@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <title>Citas - Barbería</title>
+  <!-- Cliente JS de Supabase: se usa para autenticación y consultas a la base -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-
-
+  <!-- Navegación simple entre páginas -->
   <header style="text-align:center; margin-bottom:18px;">
     <nav>
       <a href="index.html">Inicio</a> |
@@ -27,26 +27,32 @@
           <h1>💈 Tus Citas</h1>
         </div>
         <div class="col text-center">
+          <!-- Botón para cerrar sesión del usuario (usa supabase.auth) -->
           <button id="logoutBtn">Cerrar sesión</button>
         </div>
       </div>
 
+      <!-- Formulario para reservar una cita. Se valida en cliente y se envía a la tabla `citas` en Supabase -->
       <form id="formCita" class="form-inner">
         <input type="text" id="nombre" placeholder="Tu nombre" required />
         <input type="text" id="telefono" placeholder="Teléfono" required />
-        <!-- Agregado: selector de barbero -->
+        <!-- Selector de barbero: se llena dinámicamente desde la tabla `barberos` -->
         <select id="barbero" required>
           <option value="">Selecciona un barbero</option>
         </select>
 
+        <!-- Servicios predefinidos -->
         <select id="servicio" required>
           <option value="">Selecciona un servicio</option>
           <option value="Corte de cabello">Corte de cabello</option>
           <option value="Arreglo de barba">Arreglo de barba</option>
           <option value="Corte + Barba">Corte + Barba</option>
         </select>
+
+        <!-- Fecha de la cita (YYYY-MM-DD) -->
         <input type="date" id="fecha" required />
-        <!-- Selector de horas en intervalos de 30 minutos -->
+
+        <!-- Selector de hora: opciones cada 30 minutos según el horario del barbero -->
         <select id="hora" required>
           <option value="">Selecciona una hora</option>
         </select>
@@ -54,23 +60,36 @@
       </form>
 
       <h2>Citas registradas</h2>
+      <!-- Aquí se listan las citas del usuario autenticado -->
       <div id="listaCitas" class="citas-list"></div>
     </div>
   </div>
 
-  
-
   <script>
+    /*
+      Conexión a Supabase
+      - SUPABASE_URL y SUPABASE_KEY vienen del proyecto Supabase.
+      - No es seguro poner keys públicas en producción; para este ejemplo asumimos un proyecto de aprendizaje.
+    */
     const SUPABASE_URL = "https://rxhdeyvakjdwtlqtvnak.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4aGRleXZha2pkd3RscXR2bmFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEwODU0NTgsImV4cCI6MjA3NjY2MTQ1OH0.qby_C9hC-eQ2juVPU2EUggWI01lG0HJU0tvmbdJ7Iu8";
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 
-    // Nuevo: obtener y poblar lista de barberos
+    // =====================
+    // Funciones principales
+    // =====================
+
+    // cargarBarberos
+    // - Lee la tabla `barberos` y pobla el select #barbero.
+    // - Guarda información relevante en `dataset` de cada <option> para uso posterior
+    // Entrada: ninguna
+    // Salida: modifica el DOM (select #barbero)
+    // Errores: escribe en consola si la consulta falla
     async function cargarBarberos() {
       const { data: barberos, error } = await supabase
         .from("barberos")
-        .select("id, nombre, horario_inicio, horario_fin")
+        .select("id, nombre, horario_inicio, horario_fin, dias")
         .order("nombre", { ascending: true });
 
       if (error) return console.error("Error al cargar barberos:", error);
@@ -80,49 +99,67 @@
       barberos.forEach(b => {
         const opt = document.createElement("option");
         opt.value = b.id;
-        // mostrar nombre y horario si existe
+        // Mostrar nombre y horario si existe
         opt.text = b.horario_inicio && b.horario_fin
           ? `${b.nombre} (${b.horario_inicio} - ${b.horario_fin})`
           : b.nombre;
-        // guardar horarios en dataset para ajustar min/max luego
-        opt.dataset.inicio = b.horario_inicio || "";
-        opt.dataset.fin = b.horario_fin || "";
+        // Guardar horarios y días en dataset para validaciones posteriores
+        opt.dataset.inicio = b.horario_inicio || ""; // ejemplo: "09:00:00"
+        opt.dataset.fin = b.horario_fin || "";       // ejemplo: "18:00:00"
         opt.dataset.dias = b.dias || ""; // ejemplo: "1,2,3,4,5"
         sel.appendChild(opt);
       });
     }
 
-    // Cuando cambia el barbero, poblar el select de horas según su horario
+    // Al cambiar el barbero seleccionado:
+    // - Se generan las opciones de hora en base al horario guardado en dataset
+    // - Se limpia la fecha y se deshabilita el botón de submit hasta tener fecha y hora válidas
     document.getElementById("barbero").addEventListener("change", (e) => {
       const selected = e.target.selectedOptions[0];
       const horaSelect = document.getElementById("hora");
       if (selected && selected.dataset.inicio) {
+        // dataset almacena horarios como HH:MM:SS, slice(0,5) → HH:MM
         const inicio = (selected.dataset.inicio || '').slice(0,5);
         const fin = (selected.dataset.fin || '').slice(0,5);
-        // poblar inicialmente con todos los slots del rango
+        // Poblar inicialmente con todos los slots del rango (sin comprobar reservas)
         populateHoraOptions(inicio, fin);
-        // almacenar dias en el select para validación de fecha
+        // Almacenamos también los días en el select de horas para validar después
         horaSelect.dataset.dias = selected.dataset.dias || '';
+        // Limpiar fecha para forzar re-selección y validación por día
         document.getElementById('fecha').value = '';
-        // deshabilitar submit hasta que se escoja fecha y hora
+        // Deshabilitar submit hasta que el usuario elija fecha y hora válidas
         document.querySelector('#formCita button[type=submit]').disabled = true;
       } else {
+        // Si no hay horario, deshabilitar selector de hora
         horaSelect.innerHTML = '<option value="">Selecciona una hora</option>';
         horaSelect.disabled = true;
       }
     });
 
-    // Cuando cambia la fecha, validar si el barbero trabaja ese día y filtrar horas ya reservadas
+    // Al cambiar la fecha:
+    // - Verifica si el barbero trabaja ese día (si tiene `dias` configurado)
+    // - Consulta las citas existentes para esa fecha y barbero y filtra las horas ya reservadas
     document.getElementById('fecha').addEventListener('change', async (e) => {
-      const fecha = e.target.value; // YYYY-MM-DD
+      const fecha = e.target.value; // formato YYYY-MM-DD
+      // Evitar fechas anteriores a hoy
+      const todayStr = new Date().toISOString().slice(0,10);
+      if (fecha && fecha < todayStr) {
+        alert('No puedes elegir una fecha anterior a hoy.');
+        e.target.value = '';
+        document.querySelector('#formCita button[type=submit]').disabled = true;
+        return;
+      }
       const barberoSel = document.getElementById('barbero').selectedOptions[0];
       if (!barberoSel) return alert('Selecciona un barbero primero');
+
+      // `dias` es una cadena como "1,2,3" donde 1=Lunes ... 7=Domingo
       const dias = (barberoSel.dataset.dias || '').split(',').map(s => s.trim()).filter(Boolean);
       if (dias.length > 0) {
-        const day = new Date(fecha + 'T00:00:00').getDay(); // 0=Domingo .. 6=Sábado
-        // convertir a 1=Mon..7=Sun
-        const dayNum = day === 0 ? 7 : day;
+        // new Date(...).getDay() devuelve 0=Domingo..6=Sábado. Convertimos a 1..7
+        const day = new Date(fecha + 'T00:00:00').getDay();
+        const dayNum = day === 0 ? 7 : day; // 1=Lun .. 7=Dom
         if (!dias.includes(String(dayNum))) {
+          // Si el barbero no trabaja ese día, avisamos y limpiamos la fecha
           alert('El barbero no trabaja ese día. Elige otra fecha.');
           e.target.value = '';
           document.querySelector('#formCita button[type=submit]').disabled = true;
@@ -130,28 +167,44 @@
         }
       }
 
-      // obtener horas totales del barbero
+      // Obtener horas totales del barbero desde dataset
       const inicio = (barberoSel.dataset.inicio || '').slice(0,5);
       const fin = (barberoSel.dataset.fin || '').slice(0,5);
       if (!inicio || !fin) return;
-      // generar todos los slots y luego quitar los ya reservados en esa fecha
-      const allSlots = generateSlots(inicio, fin);
-      const { data: citasExistentes, error } = await supabase.from('citas').select('hora').eq('barbero_id', parseInt(barberoSel.value,10)).eq('fecha', fecha);
-      let reserved = [];
-      if (!error && citasExistentes) reserved = citasExistentes.map(c => c.hora.slice(0,5));
 
+      // Generamos todos los slots y luego quitamos los que ya estén reservados
+      const allSlots = generateSlots(inicio, fin);
+      // Consultar citas existentes para este barbero y fecha
+      const { data: citasExistentes, error } = await supabase.from('citas')
+        .select('hora')
+        .eq('barbero_id', parseInt(barberoSel.value,10))
+        .eq('fecha', fecha);
+      let reserved = [];
+      if (!error && citasExistentes) reserved = citasExistentes.map(c => c.hora.slice(0,5)); // 'HH:MM:SS' -> 'HH:MM'
+
+      // Poblar select de horas con las horas libres
       const horaSelect = document.getElementById('hora');
       horaSelect.innerHTML = '<option value="">Selecciona una hora</option>';
       allSlots.forEach(s => {
         if (!reserved.includes(s)) {
-          const opt = document.createElement('option'); opt.value = s; opt.text = s; horaSelect.appendChild(opt);
+          const opt = document.createElement('option');
+          opt.value = s;
+          opt.text = s;
+          horaSelect.appendChild(opt);
         }
       });
 
-      // habilitar submit solo si hay opción seleccionable
+      // Habilitar submit sólo si hay al menos una hora disponible
       document.querySelector('#formCita button[type=submit]').disabled = horaSelect.options.length <= 1;
     });
 
+
+    /*
+      generateSlots(inicio, fin)
+      - Entrada: inicio y fin en formato 'HH:MM' (ej. '09:00')
+      - Salida: array de strings con slots cada 30 minutos: ['09:00', '09:30', ...]
+      - Nota: devuelve slots inclusivos desde inicio hasta fin-30min. No modifica el DOM.
+    */
     function generateSlots(inicio, fin) {
       const toMinutes = t => {
         const [hh, mm] = t.split(':').map(Number);
@@ -161,11 +214,13 @@
       const start = toMinutes(inicio);
       const end = toMinutes(fin);
       const slots = [];
+      // Iterar en pasos de 30 minutos
       for (let mins = start; mins <= end - 30; mins += 30) slots.push(toTime(mins));
       return slots;
     }
 
-    // Genera opciones cada 30 minutos entre inicio (inclusive) y fin (exclusive)
+    // populateHoraOptions(inicio, fin)
+    // - Llena el <select id="hora"> con opciones cada 30 minutos entre inicio y fin.
     function populateHoraOptions(inicio, fin) {
       const horaSelect = document.getElementById('hora');
       horaSelect.disabled = false;
@@ -196,32 +251,142 @@
       }
     }
 
+    // getUser
+    // - Obtiene el usuario autenticado desde Supabase
+    // - Si no hay usuario autenticado, redirige a login.html
     async function getUser() {
       const { data } = await supabase.auth.getUser();
-      if (!data.user) window.location.href = "login.html";
+      if (!data.user) window.location.href = "login.html"; // forzar login
       return data.user;
     }
 
+    // cargarCitas(user)
+    // - Carga las citas del usuario autenticado y las muestra en la UI
     async function cargarCitas(user) {
       const { data } = await supabase.from("citas").select("*").eq("user_id", user.id).order("fecha", { ascending: true });
       const lista = document.getElementById("listaCitas");
       lista.innerHTML = "";
+      // Mostrar cada cita en un bloque sencillo
       data.forEach(c => {
         const div = document.createElement("div");
         div.className = "cita";
-        div.innerHTML = `<strong>${c.servicio}</strong><br>📅 ${c.fecha} ⏰ ${c.hora}<br>📞 ${c.telefono}`;
+        // Mostrar los datos principales dentro de un contenedor para permitir separar el botón
+        // Añadimos también una badge que indica el estado (pendiente/finalizada)
+        const estadoBadge = c.finalizada ? '<span class="badge completed">Finalizada</span>' : '<span class="badge pending">Pendiente</span>';
+        div.innerHTML = `<div class="cita-info"><strong>${c.servicio}</strong> ${estadoBadge}<br>📅 ${c.fecha} ⏰ ${c.hora}<br>📞 ${c.telefono}</div>`;
+
+        // Sólo mostrar botón 'Cancelar' si la cita NO está finalizada
+        if (!c.finalizada) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'secondary'; // usa estilo secundario definido en CSS
+          btn.textContent = 'Cancelar';
+          // Al hacer click: confirmar y eliminar la cita en la tabla `citas`
+          btn.addEventListener('click', async () => {
+            const ok = confirm('¿Seguro que quieres cancelar esta cita?');
+            if (!ok) return;
+            btn.disabled = true;
+            // Añadimos también el filtro por user_id para mayor seguridad: solo el dueño puede borrar
+            const { error } = await supabase.from('citas').delete().eq('id', c.id).eq('user_id', user.id);
+            if (error) {
+              alert('❌ Error al cancelar la cita: ' + error.message);
+              btn.disabled = false;
+            } else {
+              alert('✅ Cita cancelada');
+              // refrescar la lista de citas para el usuario
+              cargarCitas(user);
+            }
+          });
+          div.appendChild(btn);
+        }
         lista.appendChild(div);
       });
+      // Iniciar polling que revisa si alguna cita se marcó finalizada y notifica al usuario
+      startFinalizadaPolling(user.id);
     }
 
+    // Polling simple mejorado: cada 10s comprobamos nuevas citas finalizadas
+    // - Almacena en localStorage los IDs ya notificados para evitar repetir alertas
+    // - Agrupa varias finalizaciones en una sola alerta para evitar saturar al usuario
+    let _pollInterval = null;
+
+    function _getNotifiedFinalizadas(userId) {
+      try {
+        const key = `notifiedFinalizadas_${userId}`;
+        const raw = localStorage.getItem(key);
+        if (!raw) return new Set();
+        const arr = JSON.parse(raw);
+        return new Set(Array.isArray(arr) ? arr : []);
+      } catch (e) {
+        console.error('Error leyendo notifiedFinalizadas:', e);
+        return new Set();
+      }
+    }
+
+    function _saveNotifiedFinalizadas(userId, set) {
+      try {
+        const key = `notifiedFinalizadas_${userId}`;
+        localStorage.setItem(key, JSON.stringify(Array.from(set)));
+      } catch (e) {
+        console.error('Error guardando notifiedFinalizadas:', e);
+      }
+    }
+
+    function startFinalizadaPolling(userId) {
+      if (_pollInterval) clearInterval(_pollInterval);
+      // Ejecutar inmediatamente y luego cada 10s
+      const runOnce = async () => {
+        try {
+          const { data, error } = await supabase.from('citas').select('id, servicio, fecha, hora, finalizada').eq('user_id', userId).eq('finalizada', true);
+          if (error) return console.error('Error al comprobar finalizadas:', error.message || error);
+
+          const notified = _getNotifiedFinalizadas(userId);
+          // Filtrar sólo las finalizadas que aún NO hemos notificado
+          const nuevas = (data || []).filter(c => !notified.has(String(c.id)));
+          if (nuevas.length > 0) {
+            // Agrupar en una sola notificación (mejor UX que múltiples alertas)
+            const lines = nuevas.map(c => `- ${c.servicio} (${c.fecha} ${c.hora})`);
+            alert(`Las siguientes citas han sido marcadas como finalizadas:\n\n${lines.join('\n')}`);
+
+            // Marcar como notificadas
+            nuevas.forEach(c => notified.add(String(c.id)));
+            _saveNotifiedFinalizadas(userId, notified);
+
+            // Refrescar la lista de citas para mostrar los badges actualizados
+            const user = await getUser();
+            cargarCitas(user);
+          }
+        } catch (e) {
+          console.error('Polling finalizadas error:', e);
+        }
+      };
+
+      // Primera ejecución inmediata
+      runOnce();
+      _pollInterval = setInterval(runOnce, 10000);
+    }
+
+    // Envío del formulario de cita
+    // - Valida que el usuario y los campos requeridos existan
+    // - Inserta la nueva fila en la tabla `citas`
     document.getElementById("formCita").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const user = await getUser();
+      const user = await getUser(); // redirige a login si no está autenticado
       const barberoId = e.target.barbero.value;
       if (!barberoId) return alert("Selecciona un barbero");
       const fecha = e.target.fecha.value;
       const hora = e.target.hora.value;
+      // Validar fecha y hora
       if (!fecha || !hora) return alert('Selecciona fecha y hora válidas');
+      const today = new Date().toISOString().slice(0,10);
+      if (fecha < today) return alert('No puedes reservar una fecha anterior a hoy');
+
+      // Comprobar si ya existe una cita para ese barbero/fecha/hora (evitar duplicados)
+      const { data: existingCitas, error: errExist } = await supabase.from('citas').select('hora').eq('barbero_id', parseInt(barberoId,10)).eq('fecha', fecha);
+      if (!errExist && existingCitas) {
+        const reserved = existingCitas.map(c => (c.hora || '').slice(0,5));
+        if (reserved.includes(hora)) return alert('⚠️ Ese horario ya está reservado. Elige otra hora.');
+      }
 
       const nueva = {
         user_id: user.id,
@@ -232,21 +397,25 @@
         fecha: fecha,
         hora: hora,
       };
+
+      // insertar en Supabase
       const { error } = await supabase.from("citas").insert([nueva]);
       if (error) alert(error.message);
       else {
         alert("✅ Cita registrada");
+        // refrescar lista y limpiar formulario
         cargarCitas(user);
         e.target.reset();
       }
     });
 
+    // Botón de logout: cierra la sesión en Supabase y redirige a login
     document.getElementById("logoutBtn").addEventListener("click", async () => {
       await supabase.auth.signOut();
       window.location.href = "login.html";
     });
 
-    // Cargar barberos y luego las citas del usuario
+    // Al cargar la página: primero cargamos barberos y luego, si el usuario está autenticado, sus citas
     cargarBarberos().then(() => {
       getUser().then(cargarCitas);
     });

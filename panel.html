@@ -28,7 +28,20 @@
       </form>
 
       <div id="panel" style="display:none;">
-        <h3>📅 Mis citas</h3>
+        <h3>📅 Mis citas <span id="pendientesCounter" class="counter"></span></h3>
+
+        <!-- Pestañas: Pendientes / Historial -->
+        <div class="tabs">
+          <div id="tabPendientes" class="tab active">Pendientes</div>
+          <div id="tabHistorial" class="tab">Historial</div>
+        </div>
+
+        <!-- Contenedor para filtros del historial -->
+        <div id="filtrosHistorial" style="display:none; margin-bottom:8px">
+          Desde: <input type="date" id="histDesde"> Hasta: <input type="date" id="histHasta">
+          <button id="btnFiltrarHist">Filtrar</button>
+        </div>
+
         <div id="listaCitas"></div>
 
         <h3>🕒 Actualizar mi horario</h3>
@@ -99,7 +112,12 @@
 
       loginForm.style.display = 'none';
       panel.style.display = 'block';
-      cargarCitas(barbero.id);
+  cargarCitas(barbero.id);
+  actualizarContadorPendientes(barbero.id);
+  // Iniciar listeners de pestañas
+  document.getElementById('tabPendientes').addEventListener('click', () => showTab('pendientes', barbero.id));
+  document.getElementById('tabHistorial').addEventListener('click', () => showTab('historial', barbero.id));
+  document.getElementById('btnFiltrarHist').addEventListener('click', () => cargarHistorial(barbero.id));
       // mostrar dias configurados
       if (barbero.dias) {
         const dias = barbero.dias.split(',').map(s => s.trim());
@@ -108,25 +126,89 @@
       }
     });
 
+    // Mostrar u ocultar pestañas
+    function showTab(tab, barbero_id) {
+      document.getElementById('tabPendientes').classList.toggle('active', tab === 'pendientes');
+      document.getElementById('tabHistorial').classList.toggle('active', tab === 'historial');
+      document.getElementById('filtrosHistorial').style.display = tab === 'historial' ? 'block' : 'none';
+      if (tab === 'pendientes') cargarCitas(barbero_id);
+      else cargarHistorial(barbero_id);
+    }
+
+    // Cargar citas pendientes (no finalizadas)
     async function cargarCitas(barbero_id) {
       const { data } = await supabase
         .from("citas")
         .select("*")
         .eq("barbero_id", barbero_id)
+        .eq("finalizada", false)
         .order("fecha", { ascending: true });
 
       listaCitas.innerHTML = "";
       data.forEach(cita => {
         const div = document.createElement("div");
         div.className = "cita";
-        div.innerHTML = `
-          <strong>${cita.nombre}</strong><br>
+        // Contenido principal de la cita (izquierda)
+        div.innerHTML = `<div class="cita-info"><strong>${cita.nombre}</strong><br>
           ${cita.servicio}<br>
           📅 ${cita.fecha} ⏰ ${cita.hora}<br>
-          📞 ${cita.telefono}
-        `;
+          📞 ${cita.telefono}</div>`;
+
+        // Crear contenedor de acciones (derecha)
+        const actions = document.createElement('div');
+
+        // Botón 'Finalizada' para que el barbero marque la cita como completada
+        const doneBtn = document.createElement('button');
+        doneBtn.type = 'button';
+        doneBtn.textContent = 'Finalizada';
+        doneBtn.style.marginLeft = '8px';
+        doneBtn.addEventListener('click', async () => {
+          const ok = confirm('¿Marcar esta cita como finalizada?');
+          if (!ok) return;
+          doneBtn.disabled = true;
+          const { error } = await supabase.from('citas').update({ finalizada: true }).eq('id', cita.id).eq('barbero_id', barbero_id);
+          if (error) {
+            alert('❌ Error al actualizar: ' + error.message);
+            doneBtn.disabled = false;
+          } else {
+            alert('✅ Cita marcada como finalizada');
+            cargarCitas(barbero_id);
+            actualizarContadorPendientes(barbero_id);
+          }
+        });
+
+        actions.appendChild(doneBtn);
+        div.appendChild(actions);
         listaCitas.appendChild(div);
       });
+    }
+
+    // Cargar historial: citas finalizadas, opcionalmente filtradas por rango de fechas
+    async function cargarHistorial(barbero_id) {
+      const desde = document.getElementById('histDesde').value;
+      const hasta = document.getElementById('histHasta').value;
+      let query = supabase.from('citas').select('*').eq('barbero_id', barbero_id).eq('finalizada', true).order('fecha', { ascending: false });
+      if (desde) query = query.gte('fecha', desde);
+      if (hasta) query = query.lte('fecha', hasta);
+      const { data } = await query;
+      listaCitas.innerHTML = '';
+      data.forEach(cita => {
+        const div = document.createElement('div');
+        div.className = 'cita';
+        div.innerHTML = `<div class="cita-info"><strong>${cita.nombre}</strong><br>${cita.servicio}<br>📅 ${cita.fecha} ⏰ ${cita.hora}<br>📞 ${cita.telefono}</div>`;
+        // Mostrar badge de finalizada
+        const badge = document.createElement('span'); badge.className = 'badge completed'; badge.textContent = 'Finalizada';
+        const actions = document.createElement('div');
+        actions.appendChild(badge);
+        div.appendChild(actions);
+        listaCitas.appendChild(div);
+      });
+    }
+
+    // Actualizar contador de citas pendientes
+    async function actualizarContadorPendientes(barbero_id) {
+      const { count, error } = await supabase.from('citas').select('*', { count: 'exact', head: false }).eq('barbero_id', barbero_id).eq('finalizada', false);
+      if (!error) document.getElementById('pendientesCounter').textContent = `${count || 0} pendientes`;
     }
 
     horarioForm.addEventListener("submit", async (e) => {

@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS citas (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_citas_barbero_fecha_hora
   ON citas (barbero_id, fecha, hora);
 
+-- 5️⃣ Añadir columna `finalizada` si no existe
+-- Esta columna permite marcar una cita como completada desde el panel del barbero.
+-- Usamos un bloque DO/PLPGSQL que añade la columna sólo si no existe para evitar errores
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='citas' AND column_name='finalizada'
+  ) THEN
+    ALTER TABLE citas ADD COLUMN finalizada BOOLEAN DEFAULT false;
+  END IF;
+END$$;
+
 -- ======================================================
 -- 🔒 Opcional: Permisos básicos (si estás en Supabase)
 -- ======================================================
