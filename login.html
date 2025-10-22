@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Login - Barbería</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header style="text-align:center; margin-bottom:18px;">
+    <nav>
+      <a href="index.html">Inicio</a> |
+      <a href="registro.html">Registro</a> |
+      <a href="login.html">Login</a> |
+      <a href="citas.html">Citas</a> |
+      <a href="panel.html">Panel</a>
+    </nav>
+  </header>
+
+  <div class="container center">
+    <div class="card form">
+      <h1 class="text-center">💈 Iniciar sesión</h1>
+      <form id="loginForm" class="form-inner">
+        <input type="email" id="email" placeholder="Correo electrónico" required />
+        <input type="password" id="password" placeholder="Contraseña" required />
+        <button type="submit">Entrar</button>
+      </form>
+      <p class="muted text-center">¿No tienes cuenta? <a href="registro.html">Regístrate aquí</a></p>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://rxhdeyvakjdwtlqtvnak.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4aGRleXZha2pkd3RscXR2bmFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEwODU0NTgsImV4cCI6MjA3NjY2MTQ1OH0.qby_C9hC-eQ2juVPU2EUggWI01lG0HJU0tvmbdJ7Iu8";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = e.target.email.value;
+      const password = e.target.password.value;
+
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) alert("❌ " + error.message);
+      else {
+        alert("✅ Inicio de sesión exitoso");
+        window.location.href = "citas.html";
+      }
+    });
+  </script>
+</body>
+</html>

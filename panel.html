@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Panel del Barbero</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header style="text-align:center; margin-bottom:18px;">
+    <nav>
+      <a href="index.html">Inicio</a> |
+      <a href="registro.html">Registro</a> |
+      <a href="login.html">Login</a> |
+      <a href="citas.html">Citas</a> |
+      <a href="panel.html">Panel</a>
+    </nav>
+  </header>
+
+  <div class="container">
+    <div class="card form">
+      <h2 class="text-center">🔑 Ingreso del Barbero</h2>
+      <form id="loginForm" class="form-inner">
+        <input type="text" id="usuario" placeholder="Usuario" required />
+        <input type="password" id="contrasena" placeholder="Contraseña" required />
+        <button type="submit">Entrar</button>
+      </form>
+
+      <div id="panel" style="display:none;">
+        <h3>📅 Mis citas</h3>
+        <div id="listaCitas"></div>
+
+        <h3>🕒 Actualizar mi horario</h3>
+        <form id="horarioForm" class="form-inner">
+          <label style="font-weight:600">Días de trabajo</label>
+          <div id="diasCheckboxes" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px">
+            <label><input type="checkbox" value="1"> Lun</label>
+            <label><input type="checkbox" value="2"> Mar</label>
+            <label><input type="checkbox" value="3"> Mié</label>
+            <label><input type="checkbox" value="4"> Jue</label>
+            <label><input type="checkbox" value="5"> Vie</label>
+            <label><input type="checkbox" value="6"> Sáb</label>
+            <label><input type="checkbox" value="7"> Dom</label>
+          </div>
+          <input type="time" id="inicio" required />
+          <input type="time" id="fin" required />
+          <button type="submit">Actualizar horario</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+      const SUPABASE_URL = "https://rxhdeyvakjdwtlqtvnak.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4aGRleXZha2pkd3RscXR2bmFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEwODU0NTgsImV4cCI6MjA3NjY2MTQ1OH0.qby_C9hC-eQ2juVPU2EUggWI01lG0HJU0tvmbdJ7Iu8";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const loginForm = document.getElementById("loginForm");
+    const panel = document.getElementById("panel");
+    const listaCitas = document.getElementById("listaCitas");
+    const horarioForm = document.getElementById("horarioForm");
+
+    let barberoActual = null;
+
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const usuario = (document.getElementById("usuario").value || '').trim();
+      const contrasena = (document.getElementById("contrasena").value || '').trim();
+
+      if (!usuario || !contrasena) return alert('Introduce usuario y contraseña');
+
+      // Buscar el barbero por usuario de forma case-insensitive
+      const { data: barbero, error } = await supabase
+        .from('barberos')
+        .select('*')
+        .ilike('usuario', usuario)
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error consultando barberos:', error);
+        return alert('Error al comprobar usuario. Revisa la consola.');
+      }
+
+      if (!barbero) {
+        return alert('❌ Usuario o contraseña incorrectos');
+      }
+
+      // Comparar contraseñas (si están en texto plano). Hacemos trim por seguridad.
+      const stored = (barbero.contrasena || '').trim();
+      if (stored !== contrasena) {
+        return alert('❌ Usuario o contraseña incorrectos');
+      }
+
+      barberoActual = barbero;
+      console.log('Barbero autenticado:', barbero.nombre, barbero);
+      alert(`✅ Bienvenido ${barbero.nombre}`);
+
+      loginForm.style.display = 'none';
+      panel.style.display = 'block';
+      cargarCitas(barbero.id);
+      // mostrar dias configurados
+      if (barbero.dias) {
+        const dias = barbero.dias.split(',').map(s => s.trim());
+        const checkboxes = document.querySelectorAll('#diasCheckboxes input[type=checkbox]');
+        checkboxes.forEach(cb => { cb.checked = dias.includes(cb.value); });
+      }
+    });
+
+    async function cargarCitas(barbero_id) {
+      const { data } = await supabase
+        .from("citas")
+        .select("*")
+        .eq("barbero_id", barbero_id)
+        .order("fecha", { ascending: true });
+
+      listaCitas.innerHTML = "";
+      data.forEach(cita => {
+        const div = document.createElement("div");
+        div.className = "cita";
+        div.innerHTML = `
+          <strong>${cita.nombre}</strong><br>
+          ${cita.servicio}<br>
+          📅 ${cita.fecha} ⏰ ${cita.hora}<br>
+          📞 ${cita.telefono}
+        `;
+        listaCitas.appendChild(div);
+      });
+    }
+
+    horarioForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const inicio = document.getElementById("inicio").value;
+      const fin = document.getElementById("fin").value;
+      // leer dias seleccionados
+      const dias = Array.from(document.querySelectorAll('#diasCheckboxes input[type=checkbox]:checked')).map(c => c.value).join(',');
+
+      const { error } = await supabase
+        .from("barberos")
+        .update({ horario_inicio: inicio, horario_fin: fin, dias: dias })
+        .eq("id", barberoActual.id);
+
+      if (error) alert("❌ Error al actualizar horario");
+      else alert("✅ Horario actualizado correctamente");
+    });
+  </script>
+</body>
+</html>

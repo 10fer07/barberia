@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Citas - Barbería</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+
+
+  <header style="text-align:center; margin-bottom:18px;">
+    <nav>
+      <a href="index.html">Inicio</a> |
+      <a href="registro.html">Registro</a> |
+      <a href="login.html">Login</a> |
+      <a href="citas.html">Citas</a> |
+      <a href="panel.html">Panel</a>
+    </nav>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <div class="two-col">
+        <div class="col">
+          <h1>💈 Tus Citas</h1>
+        </div>
+        <div class="col text-center">
+          <button id="logoutBtn">Cerrar sesión</button>
+        </div>
+      </div>
+
+      <form id="formCita" class="form-inner">
+        <input type="text" id="nombre" placeholder="Tu nombre" required />
+        <input type="text" id="telefono" placeholder="Teléfono" required />
+        <!-- Agregado: selector de barbero -->
+        <select id="barbero" required>
+          <option value="">Selecciona un barbero</option>
+        </select>
+
+        <select id="servicio" required>
+          <option value="">Selecciona un servicio</option>
+          <option value="Corte de cabello">Corte de cabello</option>
+          <option value="Arreglo de barba">Arreglo de barba</option>
+          <option value="Corte + Barba">Corte + Barba</option>
+        </select>
+        <input type="date" id="fecha" required />
+        <!-- Selector de horas en intervalos de 30 minutos -->
+        <select id="hora" required>
+          <option value="">Selecciona una hora</option>
+        </select>
+        <button type="submit">Reservar</button>
+      </form>
+
+      <h2>Citas registradas</h2>
+      <div id="listaCitas" class="citas-list"></div>
+    </div>
+  </div>
+
+  
+
+  <script>
+    const SUPABASE_URL = "https://rxhdeyvakjdwtlqtvnak.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4aGRleXZha2pkd3RscXR2bmFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEwODU0NTgsImV4cCI6MjA3NjY2MTQ1OH0.qby_C9hC-eQ2juVPU2EUggWI01lG0HJU0tvmbdJ7Iu8";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+
+    // Nuevo: obtener y poblar lista de barberos
+    async function cargarBarberos() {
+      const { data: barberos, error } = await supabase
+        .from("barberos")
+        .select("id, nombre, horario_inicio, horario_fin")
+        .order("nombre", { ascending: true });
+
+      if (error) return console.error("Error al cargar barberos:", error);
+
+      const sel = document.getElementById("barbero");
+      sel.innerHTML = '<option value="">Selecciona un barbero</option>';
+      barberos.forEach(b => {
+        const opt = document.createElement("option");
+        opt.value = b.id;
+        // mostrar nombre y horario si existe
+        opt.text = b.horario_inicio && b.horario_fin
+          ? `${b.nombre} (${b.horario_inicio} - ${b.horario_fin})`
+          : b.nombre;
+        // guardar horarios en dataset para ajustar min/max luego
+        opt.dataset.inicio = b.horario_inicio || "";
+        opt.dataset.fin = b.horario_fin || "";
+        opt.dataset.dias = b.dias || ""; // ejemplo: "1,2,3,4,5"
+        sel.appendChild(opt);
+      });
+    }
+
+    // Cuando cambia el barbero, poblar el select de horas según su horario
+    document.getElementById("barbero").addEventListener("change", (e) => {
+      const selected = e.target.selectedOptions[0];
+      const horaSelect = document.getElementById("hora");
+      if (selected && selected.dataset.inicio) {
+        const inicio = (selected.dataset.inicio || '').slice(0,5);
+        const fin = (selected.dataset.fin || '').slice(0,5);
+        // poblar inicialmente con todos los slots del rango
+        populateHoraOptions(inicio, fin);
+        // almacenar dias en el select para validación de fecha
+        horaSelect.dataset.dias = selected.dataset.dias || '';
+        document.getElementById('fecha').value = '';
+        // deshabilitar submit hasta que se escoja fecha y hora
+        document.querySelector('#formCita button[type=submit]').disabled = true;
+      } else {
+        horaSelect.innerHTML = '<option value="">Selecciona una hora</option>';
+        horaSelect.disabled = true;
+      }
+    });
+
+    // Cuando cambia la fecha, validar si el barbero trabaja ese día y filtrar horas ya reservadas
+    document.getElementById('fecha').addEventListener('change', async (e) => {
+      const fecha = e.target.value; // YYYY-MM-DD
+      const barberoSel = document.getElementById('barbero').selectedOptions[0];
+      if (!barberoSel) return alert('Selecciona un barbero primero');
+      const dias = (barberoSel.dataset.dias || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (dias.length > 0) {
+        const day = new Date(fecha + 'T00:00:00').getDay(); // 0=Domingo .. 6=Sábado
+        // convertir a 1=Mon..7=Sun
+        const dayNum = day === 0 ? 7 : day;
+        if (!dias.includes(String(dayNum))) {
+          alert('El barbero no trabaja ese día. Elige otra fecha.');
+          e.target.value = '';
+          document.querySelector('#formCita button[type=submit]').disabled = true;
+          return;
+        }
+      }
+
+      // obtener horas totales del barbero
+      const inicio = (barberoSel.dataset.inicio || '').slice(0,5);
+      const fin = (barberoSel.dataset.fin || '').slice(0,5);
+      if (!inicio || !fin) return;
+      // generar todos los slots y luego quitar los ya reservados en esa fecha
+      const allSlots = generateSlots(inicio, fin);
+      const { data: citasExistentes, error } = await supabase.from('citas').select('hora').eq('barbero_id', parseInt(barberoSel.value,10)).eq('fecha', fecha);
+      let reserved = [];
+      if (!error && citasExistentes) reserved = citasExistentes.map(c => c.hora.slice(0,5));
+
+      const horaSelect = document.getElementById('hora');
+      horaSelect.innerHTML = '<option value="">Selecciona una hora</option>';
+      allSlots.forEach(s => {
+        if (!reserved.includes(s)) {
+          const opt = document.createElement('option'); opt.value = s; opt.text = s; horaSelect.appendChild(opt);
+        }
+      });
+
+      // habilitar submit solo si hay opción seleccionable
+      document.querySelector('#formCita button[type=submit]').disabled = horaSelect.options.length <= 1;
+    });
+
+    function generateSlots(inicio, fin) {
+      const toMinutes = t => {
+        const [hh, mm] = t.split(':').map(Number);
+        return hh * 60 + mm;
+      };
+      const toTime = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+      const start = toMinutes(inicio);
+      const end = toMinutes(fin);
+      const slots = [];
+      for (let mins = start; mins <= end - 30; mins += 30) slots.push(toTime(mins));
+      return slots;
+    }
+
+    // Genera opciones cada 30 minutos entre inicio (inclusive) y fin (exclusive)
+    function populateHoraOptions(inicio, fin) {
+      const horaSelect = document.getElementById('hora');
+      horaSelect.disabled = false;
+      horaSelect.innerHTML = '<option value="">Selecciona una hora</option>';
+      if (!inicio || !fin) return;
+
+      const toMinutes = t => {
+        if (!t) return null;
+        const [hh, mm] = t.split(':').map(Number);
+        return hh * 60 + mm;
+      };
+      const toTime = m => {
+        const hh = Math.floor(m / 60) % 24;
+        const mm = m % 60;
+        return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+      };
+
+      const start = toMinutes(inicio);
+      const end = toMinutes(fin);
+      if (start === null || end === null || end <= start) return;
+
+      for (let mins = start; mins <= end - 30; mins += 30) {
+        const t = toTime(mins);
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.text = t;
+        horaSelect.appendChild(opt);
+      }
+    }
+
+    async function getUser() {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user) window.location.href = "login.html";
+      return data.user;
+    }
+
+    async function cargarCitas(user) {
+      const { data } = await supabase.from("citas").select("*").eq("user_id", user.id).order("fecha", { ascending: true });
+      const lista = document.getElementById("listaCitas");
+      lista.innerHTML = "";
+      data.forEach(c => {
+        const div = document.createElement("div");
+        div.className = "cita";
+        div.innerHTML = `<strong>${c.servicio}</strong><br>📅 ${c.fecha} ⏰ ${c.hora}<br>📞 ${c.telefono}`;
+        lista.appendChild(div);
+      });
+    }
+
+    document.getElementById("formCita").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const user = await getUser();
+      const barberoId = e.target.barbero.value;
+      if (!barberoId) return alert("Selecciona un barbero");
+      const fecha = e.target.fecha.value;
+      const hora = e.target.hora.value;
+      if (!fecha || !hora) return alert('Selecciona fecha y hora válidas');
+
+      const nueva = {
+        user_id: user.id,
+        barbero_id: parseInt(barberoId, 10),
+        nombre: e.target.nombre.value,
+        telefono: e.target.telefono.value,
+        servicio: e.target.servicio.value,
+        fecha: fecha,
+        hora: hora,
+      };
+      const { error } = await supabase.from("citas").insert([nueva]);
+      if (error) alert(error.message);
+      else {
+        alert("✅ Cita registrada");
+        cargarCitas(user);
+        e.target.reset();
+      }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await supabase.auth.signOut();
+      window.location.href = "login.html";
+    });
+
+    // Cargar barberos y luego las citas del usuario
+    cargarBarberos().then(() => {
+      getUser().then(cargarCitas);
+    });
+  </script>
+</body>
+</html>
